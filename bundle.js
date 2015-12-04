@@ -1,93 +1,251 @@
-(function e(t,n,r){function s(o,u){if(!n[o]){if(!t[o]){var a=typeof require=="function"&&require;if(!u&&a)return a(o,!0);if(i)return i(o,!0);var f=new Error("Cannot find module '"+o+"'");throw f.code="MODULE_NOT_FOUND",f}var l=n[o]={exports:{}};t[o][0].call(l.exports,function(e){var n=t[o][1][e];return s(n?n:e)},l,l.exports,e,t,n,r)}return n[o].exports}var i=typeof require=="function"&&require;for(var o=0;o<r.length;o++)s(r[o]);return s})({1:[function(require,module,exports){
-var FriendlyMIDI = require('friendly-midi').default;
-var midi = new FriendlyMIDI();
-midi.on('noteOn', function(data) {
-  go(data);
-});
+(function e(t,n,r){function s(o,u){if(!n[o]){if(!t[o]){var a=typeof require=="function"&&require;if(!u&&a)return a(o,!0);if(i)return i(o,!0);var f=new Error("Cannot find module '"+o+"'");throw f.code="MODULE_NOT_FOUND",f}var l=n[o]={exports:{}};t[o][0].call(l.exports,function(e){var n=t[o][1][e];return s(n?n:e)},l,l.exports,e,t,n,r)}return n[o].exports}var i=typeof require=="function"&&require;for(var o=0;o<r.length;o++)s(r[o]);return s})({"/Users/joe/dev/five-one-seven/lib/index.js":[function(require,module,exports){
+'use strict';
 
+var _createClass = (function () { function defineProperties(target, props) { for (var i = 0; i < props.length; i++) { var descriptor = props[i]; descriptor.enumerable = descriptor.enumerable || false; descriptor.configurable = true; if ("value" in descriptor) descriptor.writable = true; Object.defineProperty(target, descriptor.key, descriptor); } } return function (Constructor, protoProps, staticProps) { if (protoProps) defineProperties(Constructor.prototype, protoProps); if (staticProps) defineProperties(Constructor, staticProps); return Constructor; }; })();
+
+function _classCallCheck(instance, Constructor) { if (!(instance instanceof Constructor)) { throw new TypeError("Cannot call a class as a function"); } }
+
+var FriendlyMIDI = require('friendly-midi').default;
+
+var midi = new FriendlyMIDI();
 
 var context = new AudioContext();
 
+var notes = {};
+
+midi.on('noteOn', function (data) {
+  var voice = go(data);
+  voice.connect(context.destination);
+  voice.start(context.currentTime + 0.02);
+  notes[data.note] = voice;
+});
+midi.on('noteOff', function (data) {
+  notes[data.note].release(context.currentTime);
+});
+
+var Operator = (function () {
+  function Operator(data) {
+    _classCallCheck(this, Operator);
+
+    this.gain = context.createGain();
+    this.gain.gain.value = data.output;
+
+    this.osc = context.createOscillator();
+    this.osc.frequency.value = data.rootFrequency * data.ratio;
+    this.osc.detune.value = data.detune;
+    this.frequency = this.osc.frequency;
+
+    this.envelopeData = data.envelope;
+    this.envelopeNode = context.createGain();
+
+    this.osc.connect(this.envelopeNode);
+    this.gain.connect(context.destination);
+    this.envelopeNode.connect(this.gain);
+  }
+
+  _createClass(Operator, [{
+    key: 'connect',
+    value: function connect(targetNode) {
+      this.gain.connect(targetNode);
+    }
+  }, {
+    key: 'start',
+    value: function start(when) {
+      var env = this.envelopeData;
+      this.osc.start(when);
+      this.envelopeNode.gain.setValueAtTime(0, when);
+      var arriveAt1At = when + this.getDuration(env[0].rate, env[0].level);
+      var arriveAt2At = arriveAt1At + this.getDuration(env[1].rate, Math.abs(env[1].level - env[0].level));
+      var arriveAt3At = arriveAt2At + this.getDuration(env[2].rate, Math.abs(env[2].level - env[1].level));
+      this.envelopeNode.gain.exponentialRampToValueAtTime(env[0].level, arriveAt1At);
+      this.envelopeNode.gain.exponentialRampToValueAtTime(env[1].level, arriveAt2At);
+      this.envelopeNode.gain.exponentialRampToValueAtTime(env[2].level, arriveAt3At);
+    }
+  }, {
+    key: 'getDuration',
+    value: function getDuration(speed, distance) {
+      // This method needs tweaking big time.
+      var dur = distance / speed / 10;
+      return dur;
+    }
+  }, {
+    key: 'release',
+    value: function release(when) {
+      var env = this.envelopeData;
+      var releaseFinishTime = when + this.getDuration(env[3].rate, Math.abs(this.envelopeNode.gain.value - env[2].level));
+      this.envelopeNode.gain.cancelScheduledValues(when);
+      this.envelopeNode.gain.exponentialRampToValueAtTime(env[3].level, releaseFinishTime);
+      this.stop(releaseFinishTime);
+    }
+  }, {
+    key: 'stop',
+    value: function stop(when) {
+      this.osc.stop(when);
+    }
+  }]);
+
+  return Operator;
+})();
 
 function go(data) {
-
   var now = context.currentTime;
   var frequency = data.frequency;
+  var ops = [new Operator({
+    rootFrequency: frequency,
+    ratio: 1,
+    detune: 3,
+    envelope: [{
+      rate: 0.96,
+      level: 1
+    }, {
+      rate: 0.25,
+      level: 0.75
+    }, {
+      rate: 0.25,
+      level: 0.00001
+    }, {
+      rate: 0.67,
+      level: 0.00001
+    }],
+    output: 1
+  }), new Operator({
+    rootFrequency: frequency,
+    ratio: 14,
+    detune: 0,
+    envelope: [{
+      rate: 0.95,
+      level: 0.99
+    }, {
+      rate: 0.5,
+      level: 0.75
+    }, {
+      rate: 0.35,
+      level: 0.00001
+    }, {
+      rate: 0.78,
+      level: 0.00001
+    }],
+    output: 0.58
+  }), new Operator({
+    rootFrequency: frequency,
+    ratio: 1,
+    detune: 0,
+    envelope: [{
+      rate: 0.95,
+      level: 0.99
+    }, {
+      rate: 0.20,
+      level: 0.95
+    }, {
+      rate: 0.20,
+      level: 0.0001
+    }, {
+      rate: 0.50,
+      level: 0.0001
+    }],
+    output: 1
+  }), new Operator({
+    rootFrequency: frequency,
+    ratio: 1,
+    detune: 0,
+    envelope: [{
+      rate: 0.95,
+      level: 0.99
+    }, {
+      rate: 0.29,
+      level: 0.95
+    }, {
+      rate: 0.20,
+      level: 0.0001
+    }, {
+      rate: 0.50,
+      level: 0.0001
+    }],
+    output: 0.89
+  }), new Operator({
+    rootFrequency: frequency,
+    ratio: 1,
+    detune: -7,
+    envelope: [{
+      rate: 0.95,
+      level: 0.99
+    }, {
+      rate: 0.20,
+      level: 0.95
+    }, {
+      rate: 0.10,
+      level: 0.5
+    }, {
+      rate: 0.01,
+      level: 0.0001
+    }],
+    output: 0.99
+  }), new Operator({
+    rootFrequency: frequency,
+    ratio: 1,
+    detune: 7,
+    envelope: [{
+      rate: 0.95,
+      level: 0.99
+    }, {
+      rate: 0.29,
+      level: 0.95
+    }, {
+      rate: 0.20,
+      level: 0.5
+    }, {
+      rate: 0.10,
+      level: 0.0001
+    }],
+    output: 0.79
+  })];
 
-  var carrier = context.createOscillator();
-  carrier.frequency.value = frequency;
-  var carrierGain = context.createGain();
-  carrierGain.gain.setValueAtTime(0, now);
+  var output = context.createGain();
 
-  var modulator = context.createOscillator();
-  modulator.frequency.value = frequency * 18;
-  var modulatorGain = context.createGain();
-  modulatorGain.gain.setValueAtTime(0, now);
+  var op1 = ops[0];
+  var op2 = ops[1];
+  var op3 = ops[2];
+  var op4 = ops[3];
+  var op5 = ops[4];
+  var op6 = ops[5];
 
-  modulator.connect(modulatorGain);
-  modulatorGain.connect(carrier.frequency);
+  op2.connect(op1.frequency);
+  op4.connect(op3.frequency);
+  op6.connect(op6.frequency);
+  op6.connect(op5.frequency);
 
-  carrier.connect(carrierGain);
-  carrierGain.connect(context.destination);
+  op1.connect(output);
+  op3.connect(output);
+  op5.connect(output);
 
-  modulator.start(context.currentTime);
-  carrier.start(context.currentTime);
-
-  [ [0, 0], [10, 1], [20, 0.9], [50, 0.8], [300, 0.8], [500, 0]].forEach(function(point) {
-    if (point[0] === 0) {
-      point[0] = 0.000001;
+  return {
+    start: function start(when) {
+      ops.forEach(function (op) {
+        op.start(when);
+      });
+    },
+    stop: function stop(when) {
+      ops.forEach(function (op) {
+        op.stop(when);
+      });
+    },
+    release: function release(when) {
+      ops.forEach(function (op) {
+        op.release(when);
+      });
+    },
+    connect: function connect(targetNode) {
+      output.connect(targetNode);
     }
-    modulatorGain.gain.exponentialRampToValueAtTime(300 * point[0], now + point[1] / 1000);
-  });
+  };
+};
 
-  [ [0, 0], [10, 1], [20, 0.9], [50, 0.8], [100, 0.8], [1000, 0]].forEach(function(point) {
-    if (point[1] === 0) {
-      point[1] = 0.000001;
-    }
-    carrierGain.gain.exponentialRampToValueAtTime(point[1], now + (point[0] / 1000));
-  });
+},{"friendly-midi":"/Users/joe/dev/five-one-seven/node_modules/friendly-midi/lib/index.js"}],"/Users/joe/dev/five-one-seven/main.js":[function(require,module,exports){
+'use strict';
 
-
-  var carrier = context.createOscillator();
-  carrier.frequency.value = frequency;
-  var carrierGain = context.createGain();
-  carrierGain.gain.setValueAtTime(0, now);
-
-  var modulator = context.createOscillator();
-  modulator.frequency.value = frequency * 18;
-  var modulatorGain = context.createGain();
-  modulatorGain.gain.setValueAtTime(0, now);
-
-  modulator.connect(modulatorGain);
-  modulatorGain.connect(carrier.frequency);
-
-  carrier.connect(carrierGain);
-  carrierGain.connect(context.destination);
-
-  //modulator.start(context.currentTime);
-  carrier.start(context.currentTime);
-
-  [ [0, 0], [10, 1], [20, 0.9], [50, 0.8], [300, 0.8], [500, 0]].forEach(function(point) {
-    if (point[0] === 0) {
-      point[0] = 0.000001;
-    }
-    modulatorGain.gain.exponentialRampToValueAtTime(600 * point[0], now + point[1] / 1000);
-  });
-
-  [ [0, 0], [10, 1], [20, 0.9], [50, 0.8], [900, 0.8], [3300, 0]].forEach(function(point) {
-    if (point[1] === 0) {
-      point[1] = 0.000001;
-    }
-    carrierGain.gain.exponentialRampToValueAtTime(point[1], now + (point[0] / 1000));
-  });
-
-}
-
-
-},{"friendly-midi":3}],2:[function(require,module,exports){
 require('./lib/index');
 
-},{"./lib/index":1}],3:[function(require,module,exports){
+},{"./lib/index":"/Users/joe/dev/five-one-seven/lib/index.js"}],"/Users/joe/dev/five-one-seven/node_modules/friendly-midi/lib/index.js":[function(require,module,exports){
 'use strict';
 
 var _createClass = (function () { function defineProperties(target, props) { for (var i = 0; i < props.length; i++) { var descriptor = props[i]; descriptor.enumerable = descriptor.enumerable || false; descriptor.configurable = true; if ("value" in descriptor) descriptor.writable = true; Object.defineProperty(target, descriptor.key, descriptor); } } return function (Constructor, protoProps, staticProps) { if (protoProps) defineProperties(Constructor.prototype, protoProps); if (staticProps) defineProperties(Constructor, staticProps); return Constructor; }; })();
@@ -201,7 +359,7 @@ var FriendlyMIDI = (function (_EventEmitter) {
 })(_events.EventEmitter);
 
 exports.default = FriendlyMIDI;
-},{"events":5,"midiutils":4}],4:[function(require,module,exports){
+},{"events":"/usr/local/lib/node_modules/watchify/node_modules/browserify/node_modules/events/events.js","midiutils":"/Users/joe/dev/five-one-seven/node_modules/friendly-midi/node_modules/midiutils/src/MIDIUtils.js"}],"/Users/joe/dev/five-one-seven/node_modules/friendly-midi/node_modules/midiutils/src/MIDIUtils.js":[function(require,module,exports){
 (function() {
 
 	var noteMap = {};
@@ -267,7 +425,7 @@ exports.default = FriendlyMIDI;
 }).call(this);
 
 
-},{}],5:[function(require,module,exports){
+},{}],"/usr/local/lib/node_modules/watchify/node_modules/browserify/node_modules/events/events.js":[function(require,module,exports){
 // Copyright Joyent, Inc. and other Node contributors.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a
@@ -351,11 +509,18 @@ EventEmitter.prototype.emit = function(type) {
         break;
       // slower
       default:
-        args = Array.prototype.slice.call(arguments, 1);
+        len = arguments.length;
+        args = new Array(len - 1);
+        for (i = 1; i < len; i++)
+          args[i - 1] = arguments[i];
         handler.apply(this, args);
     }
   } else if (isObject(handler)) {
-    args = Array.prototype.slice.call(arguments, 1);
+    len = arguments.length;
+    args = new Array(len - 1);
+    for (i = 1; i < len; i++)
+      args[i - 1] = arguments[i];
+
     listeners = handler.slice();
     len = listeners.length;
     for (i = 0; i < len; i++)
@@ -393,6 +558,7 @@ EventEmitter.prototype.addListener = function(type, listener) {
 
   // Check for listener leak
   if (isObject(this._events[type]) && !this._events[type].warned) {
+    var m;
     if (!isUndefined(this._maxListeners)) {
       m = this._maxListeners;
     } else {
@@ -514,7 +680,7 @@ EventEmitter.prototype.removeAllListeners = function(type) {
 
   if (isFunction(listeners)) {
     this.removeListener(type, listeners);
-  } else if (listeners) {
+  } else {
     // LIFO order
     while (listeners.length)
       this.removeListener(type, listeners[listeners.length - 1]);
@@ -535,20 +701,15 @@ EventEmitter.prototype.listeners = function(type) {
   return ret;
 };
 
-EventEmitter.prototype.listenerCount = function(type) {
-  if (this._events) {
-    var evlistener = this._events[type];
-
-    if (isFunction(evlistener))
-      return 1;
-    else if (evlistener)
-      return evlistener.length;
-  }
-  return 0;
-};
-
 EventEmitter.listenerCount = function(emitter, type) {
-  return emitter.listenerCount(type);
+  var ret;
+  if (!emitter._events || !emitter._events[type])
+    ret = 0;
+  else if (isFunction(emitter._events[type]))
+    ret = 1;
+  else
+    ret = emitter._events[type].length;
+  return ret;
 };
 
 function isFunction(arg) {
@@ -567,4 +728,4 @@ function isUndefined(arg) {
   return arg === void 0;
 }
 
-},{}]},{},[2]);
+},{}]},{},["/Users/joe/dev/five-one-seven/main.js"]);
