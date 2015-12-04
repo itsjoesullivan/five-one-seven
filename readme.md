@@ -1,3 +1,16 @@
+## Usage
+
+```javascript
+var Synth = require('five-one-seven');
+
+var context = new AudioContext();
+var synth = new Synth(context, patch);
+
+note = synth.noteOn(noteOnData);
+note.connect(context.destination);
+```
+
+
 ### Resources
 
 http://www.chipple.net/dx7/english/fm.tone.generation.html
@@ -10,3 +23,4 @@ http://sourceforge.net/u/tedfelix/dx7dump/ci/master/tree/
 http://www.manualslib.com/manual/196296/Yamaha-Dx7.html?page=29
 http://www.chipple.net/dx7/fig15-4.gif
 http://www.sketchappsources.com/resources/source-images-plus1/Yamaha-DX7-1.png
+
